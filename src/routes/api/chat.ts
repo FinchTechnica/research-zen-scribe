@@ -55,7 +55,7 @@ export const Route = createFileRoute("/api/chat")({
         const result = streamText({
           model: gateway("google/gemini-3-flash-preview"),
           system: SYSTEM,
-          messages: convertToModelMessages(messages),
+          messages: await convertToModelMessages(messages),
           stopWhen: stepCountIs(50),
           tools: {
             searchArticles: tool({

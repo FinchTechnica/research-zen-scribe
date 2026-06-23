@@ -116,7 +116,7 @@ function SettingsPage() {
     if (!user) return;
     const { data, error } = await supabase
       .from("feedback")
-      .insert({ user_id: user.id, subject, message, kind: fbKind })
+      .insert({ user_id: user.id, subject, message, kind: fbKind, submission_number: 0 })
       .select()
       .single();
     if (error) { console.error(error); return toast.error("Could not submit feedback."); }

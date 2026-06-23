@@ -11,7 +11,13 @@ Each conversation is scoped to ONE task. Your job:
 2. Use the searchArticles tool to find peer-reviewed sources via OpenAlex.
 3. For each result, briefly summarize relevance to the task (2-3 sentences).
 4. When the user wants to keep an article, use the saveReference tool to add it to their references list.
-5. Be concise, cite years, use markdown lists. Never invent DOIs or papers — only return what tools provide.`;
+5. When the user asks for a synthesis (e.g. "summarize findings", "what do these papers say"),
+   call summarizeFindings to load every saved reference for this task before answering, then write a
+   thematic overview (key themes, agreements, disagreements, gaps) grounded ONLY in the returned abstracts.
+6. When the user asks to compare papers (methodology, results, samples), call compareReferences and
+   render the result as a markdown table. Be specific about what is missing in the abstract.
+7. Be concise, cite years inline like (Smith 2021), use markdown lists. Never invent DOIs or papers —
+   only return what tools provide.`;
 
 export const Route = createFileRoute("/api/chat")({
   server: {
@@ -140,8 +146,53 @@ export const Route = createFileRoute("/api/chat")({
                   })
                   .select()
                   .single();
-                if (error) return { ok: false, error: error.message };
+                if (error) {
+                  console.error("saveReference tool error", error);
+                  return { ok: false, error: "Could not save reference." };
+                }
                 return { ok: true, id: data.id, title: data.title };
+              },
+            }),
+            summarizeFindings: tool({
+              description:
+                "Load all saved references for the current task and return their titles, authors, year, and abstracts so the model can synthesize a thematic overview. Call this when the user asks to summarize, synthesize, or describe what the saved papers say.",
+              inputSchema: z.object({}),
+              execute: async () => {
+                const { data, error } = await supabase
+                  .from("references")
+                  .select("title, authors, year, journal, abstract")
+                  .eq("task_id", taskId)
+                  .eq("user_id", userId)
+                  .order("year", { ascending: false });
+                if (error) {
+                  console.error("summarizeFindings tool error", error);
+                  return { ok: false, error: "Could not load saved references." };
+                }
+                return { ok: true, count: data.length, references: data };
+              },
+            }),
+            compareReferences: tool({
+              description:
+                "Load saved references and return abstract excerpts useful for a side-by-side comparison (methodology, results, sample, year). Call this when the user asks to compare papers; then render a markdown table.",
+              inputSchema: z.object({
+                referenceIds: z
+                  .array(z.string())
+                  .optional()
+                  .describe("Optional subset of reference IDs to compare. Omit for all saved references."),
+              }),
+              execute: async ({ referenceIds }) => {
+                let q = supabase
+                  .from("references")
+                  .select("id, title, authors, year, journal, abstract")
+                  .eq("task_id", taskId)
+                  .eq("user_id", userId);
+                if (referenceIds && referenceIds.length > 0) q = q.in("id", referenceIds);
+                const { data, error } = await q.order("year", { ascending: false });
+                if (error) {
+                  console.error("compareReferences tool error", error);
+                  return { ok: false, error: "Could not load saved references." };
+                }
+                return { ok: true, count: data.length, references: data };
               },
             }),
           },

@@ -38,6 +38,39 @@ export type Database = {
         }
         Relationships: []
       }
+      feedback: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          message: string
+          status: string
+          subject: string
+          submission_number: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind?: string
+          message: string
+          status?: string
+          subject: string
+          submission_number: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          message?: string
+          status?: string
+          subject?: string
+          submission_number?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       messages: {
         Row: {
           created_at: string
@@ -78,16 +111,19 @@ export type Database = {
           created_at: string
           full_name: string | null
           id: string
+          notification_prefs: Json
         }
         Insert: {
           created_at?: string
           full_name?: string | null
           id: string
+          notification_prefs?: Json
         }
         Update: {
           created_at?: string
           full_name?: string | null
           id?: string
+          notification_prefs?: Json
         }
         Relationships: []
       }
@@ -174,8 +210,50 @@ export type Database = {
           },
         ]
       }
+      subtasks: {
+        Row: {
+          completed: boolean
+          created_at: string
+          id: string
+          position: number
+          task_id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed?: boolean
+          created_at?: string
+          id?: string
+          position?: number
+          task_id: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed?: boolean
+          created_at?: string
+          id?: string
+          position?: number
+          task_id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subtasks_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
+          archived: boolean
           category_id: string | null
           completed: boolean
           completed_at: string | null
@@ -188,6 +266,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          archived?: boolean
           category_id?: string | null
           completed?: boolean
           completed_at?: string | null
@@ -200,6 +279,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          archived?: boolean
           category_id?: string | null
           completed?: boolean
           completed_at?: string | null

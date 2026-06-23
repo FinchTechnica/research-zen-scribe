@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Countdown } from "@/components/countdown";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, Send, Download, ExternalLink, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Send, Download, ExternalLink, Trash2, Loader2, Archive, Plus } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
@@ -27,23 +27,29 @@ type RefRow = {
   doi: string | null; url: string | null; abstract: string | null; selected: boolean;
 };
 
+type Subtask = { id: string; title: string; completed: boolean };
+
 function TaskPage() {
   const { taskId } = Route.useParams();
   const [task, setTask] = useState<any>(null);
   const [refs, setRefs] = useState<RefRow[]>([]);
+  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
+  const [newSub, setNewSub] = useState("");
   const [template, setTemplate] = useState<string>("{authors} ({year}). {title}. {journal}. {doi}");
   const [initialMessages, setInitialMessages] = useState<any[] | null>(null);
   const exportFn = useServerFn(exportReferencesDocx);
 
   async function loadAll() {
-    const [{ data: t }, { data: rs }, { data: tpl }, { data: { session } }] = await Promise.all([
+    const [{ data: t }, { data: rs }, { data: st }, { data: tpl }, { data: { session } }] = await Promise.all([
       supabase.from("tasks").select("*").eq("id", taskId).maybeSingle(),
       supabase.from("references").select("*").eq("task_id", taskId).order("created_at"),
+      supabase.from("subtasks").select("id, title, completed").eq("task_id", taskId).order("position").order("created_at"),
       supabase.from("reference_templates").select("format").eq("is_default", true).maybeSingle(),
       supabase.auth.getSession(),
     ]);
     setTask(t);
     setRefs((rs as RefRow[]) ?? []);
+    setSubtasks((st as Subtask[]) ?? []);
     if (tpl?.format) setTemplate(tpl.format);
 
     const { data: msgs } = await supabase
@@ -69,6 +75,31 @@ function TaskPage() {
   async function deleteRef(id: string) {
     await supabase.from("references").delete().eq("id", id);
     refreshRefs();
+  }
+
+  async function addSubtask() {
+    const title = newSub.trim();
+    if (!title) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase.from("subtasks").insert({
+      task_id: taskId, user_id: user.id, title, position: subtasks.length,
+    });
+    if (error) { console.error(error); return toast.error("Could not add subtask."); }
+    setNewSub("");
+    loadAll();
+  }
+  async function toggleSub(s: Subtask) {
+    await supabase.from("subtasks").update({ completed: !s.completed }).eq("id", s.id);
+    setSubtasks((xs) => xs.map((x) => (x.id === s.id ? { ...x, completed: !x.completed } : x)));
+  }
+  async function delSub(id: string) {
+    await supabase.from("subtasks").delete().eq("id", id);
+    setSubtasks((xs) => xs.filter((x) => x.id !== id));
+  }
+  async function archiveTask() {
+    await supabase.from("tasks").update({ archived: true }).eq("id", taskId);
+    toast.success("Archived");
   }
 
   async function exportDocx() {
@@ -107,9 +138,36 @@ function TaskPage() {
                   <CardTitle className="text-2xl">{task.title}</CardTitle>
                   {task.description && <p className="text-sm text-muted-foreground mt-1">{task.description}</p>}
                 </div>
-                {task.deadline && !task.completed && <Countdown deadline={task.deadline} />}
+                <div className="flex items-center gap-2">
+                  {task.deadline && !task.completed && <Countdown deadline={task.deadline} />}
+                  <Button variant="ghost" size="sm" onClick={archiveTask}><Archive className="h-4 w-4 mr-1" />Archive</Button>
+                </div>
               </div>
             </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Subtasks <Badge variant="secondary" className="ml-1">{subtasks.filter((s) => s.completed).length}/{subtasks.length}</Badge></CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex gap-2">
+                <Input value={newSub} onChange={(e) => setNewSub(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSubtask(); } }} placeholder="Add a subtask…" />
+                <Button size="icon" onClick={addSubtask} aria-label="Add subtask"><Plus className="h-4 w-4" /></Button>
+              </div>
+              {subtasks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No subtasks yet.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {subtasks.map((s) => (
+                    <li key={s.id} className="flex items-center gap-2 group">
+                      <Checkbox checked={s.completed} onCheckedChange={() => toggleSub(s)} />
+                      <span className={"flex-1 text-sm " + (s.completed ? "line-through text-muted-foreground" : "")}>{s.title}</span>
+                      <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100" onClick={() => delSub(s.id)} aria-label="Delete subtask"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
           </Card>
           <Chat taskId={taskId} initialMessages={initialMessages} onActivity={refreshRefs} />
         </div>

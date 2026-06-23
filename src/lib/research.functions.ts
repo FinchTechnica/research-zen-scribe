@@ -14,6 +14,7 @@ export type ArticleHit = {
 
 /** Search OpenAlex for academic articles. */
 export const searchArticles = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => {
     const v = input as { query?: string; perPage?: number };
     if (!v || typeof v.query !== "string" || v.query.trim().length === 0) {
@@ -32,7 +33,10 @@ export const searchArticles = createServerFn({ method: "POST" })
     const res = await fetch(url.toString(), {
       headers: { "User-Agent": "ScholarTasks/1.0 (mailto:hello@lovable.dev)" },
     });
-    if (!res.ok) throw new Error(`OpenAlex error: ${res.status}`);
+    if (!res.ok) {
+      console.error("OpenAlex error", res.status);
+      throw new Error("Article search service is unavailable. Please try again.");
+    }
     const json = (await res.json()) as { results?: any[] };
     const results: ArticleHit[] = (json.results ?? []).map((w: any) => {
       const authors: string[] = (w.authorships ?? [])
@@ -95,7 +99,10 @@ export const saveReference = createServerFn({ method: "POST" })
       })
       .select()
       .single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      console.error("saveReference error", error);
+      throw new Error("Could not save reference. Please try again.");
+    }
     return row;
   });
 
@@ -123,35 +130,79 @@ export const exportReferencesDocx = createServerFn({ method: "POST" })
     ]);
     const refs = refsRes.data ?? [];
     const template = tplRes.data?.format ?? "{authors} ({year}). {title}. {journal}. {doi}";
-    const { applyTemplate } = await import("./cite");
-    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
-    const heading = new Paragraph({
-      heading: HeadingLevel.HEADING_1,
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: "References", bold: true })],
-    });
-    const sub = new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 300 },
-      children: [new TextRun({ text: task?.title ?? "Research Task", italics: true })],
-    });
-    const body = refs.map(
-      (r) =>
-        new Paragraph({
-          spacing: { after: 200 },
-          indent: { left: 720, hanging: 720 },
-          children: [new TextRun(applyTemplate(template, r as any))],
-        }),
-    );
-    const doc = new Document({
-      styles: { default: { document: { run: { font: "Calibri", size: 24 } } } },
-      sections: [
-        {
-          properties: { page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
-          children: [heading, sub, ...body],
-        },
-      ],
-    });
-    const buffer = await Packer.toBase64String(doc);
-    return { base64: buffer, filename: `references-${(task?.title ?? "task").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.docx`, count: refs.length };
+    const base64 = await buildReferencesDocx(template, refs as any[], task?.title ?? "Research Task");
+    return { base64, filename: `references-${slug(task?.title ?? "task")}.docx`, count: refs.length };
   });
+
+/**
+ * Bulk export: select reference IDs across multiple tasks and produce
+ * a single .docx using the user's template.
+ */
+export const bulkExportReferencesDocx = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => {
+    const v = input as { referenceIds?: unknown; templateId?: string };
+    if (!Array.isArray(v?.referenceIds) || v.referenceIds.length === 0) {
+      throw new Error("Select at least one reference to export.");
+    }
+    const ids = (v.referenceIds as unknown[])
+      .filter((x): x is string => typeof x === "string" && x.length > 0)
+      .slice(0, 1000);
+    if (ids.length === 0) throw new Error("Select at least one reference to export.");
+    return { referenceIds: ids, templateId: typeof v.templateId === "string" ? v.templateId : undefined };
+  })
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const [refsRes, tplRes] = await Promise.all([
+      supabase
+        .from("references")
+        .select("*")
+        .in("id", data.referenceIds)
+        .eq("user_id", userId)
+        .order("created_at"),
+      data.templateId
+        ? supabase.from("reference_templates").select("*").eq("id", data.templateId).eq("user_id", userId).maybeSingle()
+        : supabase.from("reference_templates").select("*").eq("user_id", userId).eq("is_default", true).maybeSingle(),
+    ]);
+    const refs = refsRes.data ?? [];
+    const template = tplRes.data?.format ?? "{authors} ({year}). {title}. {journal}. {doi}";
+    const base64 = await buildReferencesDocx(template, refs as any[], "Reference Library");
+    return { base64, filename: `reference-library-${new Date().toISOString().slice(0, 10)}.docx`, count: refs.length };
+  });
+
+function slug(s: string) {
+  return s.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+}
+
+async function buildReferencesDocx(template: string, refs: any[], heading: string): Promise<string> {
+  const { applyTemplate } = await import("./cite");
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
+  const h = new Paragraph({
+    heading: HeadingLevel.HEADING_1,
+    alignment: AlignmentType.CENTER,
+    children: [new TextRun({ text: "References", bold: true })],
+  });
+  const sub = new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 300 },
+    children: [new TextRun({ text: heading, italics: true })],
+  });
+  const body = refs.map(
+    (r) =>
+      new Paragraph({
+        spacing: { after: 200 },
+        indent: { left: 720, hanging: 720 },
+        children: [new TextRun(applyTemplate(template, r))],
+      }),
+  );
+  const doc = new Document({
+    styles: { default: { document: { run: { font: "Calibri", size: 24 } } } },
+    sections: [
+      {
+        properties: { page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
+        children: [h, sub, ...body],
+      },
+    ],
+  });
+  return await Packer.toBase64String(doc);
+}

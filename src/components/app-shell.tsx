@@ -1,9 +1,11 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ReactNode } from "react";
-import { BookOpen, LayoutGrid, Settings, LogOut } from "lucide-react";
+import { BookOpen, LayoutGrid, Settings, LogOut, Library, Archive } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { PalettePicker } from "@/components/palette-picker";
 import { Button } from "@/components/ui/button";
+import { NotificationsWatcher } from "@/components/notifications-watcher";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -12,7 +14,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     navigate({ to: "/auth" });
   }
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
+      <NotificationsWatcher />
       <header className="border-b sticky top-0 z-20 bg-background/80 backdrop-blur">
         <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 font-semibold">
@@ -26,8 +29,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Link to="/"><LayoutGrid className="h-4 w-4 mr-2" />Tasks</Link>
             </Button>
             <Button asChild variant="ghost" size="sm">
+              <Link to="/library"><Library className="h-4 w-4 mr-2" />Library</Link>
+            </Button>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/archive"><Archive className="h-4 w-4 mr-2" />Archive</Link>
+            </Button>
+            <Button asChild variant="ghost" size="sm">
               <Link to="/settings"><Settings className="h-4 w-4 mr-2" />Settings</Link>
             </Button>
+            <PalettePicker />
             <ThemeToggle />
             <Button variant="ghost" size="icon" onClick={logout} aria-label="Sign out">
               <LogOut className="h-4 w-4" />
@@ -35,7 +45,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+      <main className="mx-auto max-w-6xl px-4 py-6 relative z-10">{children}</main>
     </div>
   );
 }
